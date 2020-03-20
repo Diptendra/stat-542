@@ -1,5 +1,5 @@
 ---
-title: "HW3_dbagchi2"
+title: "HW4_dbagchi2"
 author: "Diptendra Nath Bagchi (dbagchi2@illinois.edu)"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
@@ -27,523 +27,410 @@ library("MASS")
 library("glmnet")
 library("ISLR")
 library("tibble")
+library("KernSmooth")
+library("ElemStatLearn")
+library("gridExtra")
 ```
 
-# Question 1 [70 Points] Lasso and Coordinate Descent
+# Question 1 [40 Points] K-Means Clustering
+Let’s consider coding our own K-means algorithm. Perform the following:
 
-## a. [15 points]
-
-![Derivation](/Users/diptendrabagchi/Documents/GitHub/stat-542/hw3_dbagchi2/Derivation_1a.jpeg)
-
-```{r}
-soft_th = function(b, lambda) {
-  if (b > lambda) {
-    soft_th_val = b - lambda
-  } else if (b < -lambda) {
-    soft_th_val = b + lambda
-  } else {
-    soft_th_val = 0
-  }
-  return (soft_th_val)
-}
-```
-
-### b. [15 points]
-Let’s write one iteration of the coordinate descent algorithm that goes through variables 1 to p and update their parameter values. First, we will generate the following data:
-
-```{r}
-set.seed(1)
-n = 200
-p = 500
-
-# generate data
-V = matrix(0.2, p, p)
-diag(V) = 1
-X_org = as.matrix(mvrnorm(n, mu = rep(0, p), Sigma = V))
-true_b = c(runif(10, -1, 1), rep(0, p-10))
-y_org = X_org %*% true_b + rnorm(n)
-
-# Center and Scale the origial X matix
-
-
-x_normalized = apply(X = X_org, 2, 
-                     function(x) (x - mean(x)) / sqrt(sum((x - mean(x)) ^ 2) / n))
-
-mean_x = apply(X = X_org, 2, mean)
-sd_x = apply(X = X_org, 2, function(x) sqrt(sum((x - mean(x)) ^ 2) / n))
-
-# x transpose x to see if the diagonal values are n or not
-a = t(x_normalized) %*% x_normalized
-
-# Center the outcome variable, here y_org
-y_center = as.matrix(apply(X = y_org, 2, 
-                 function(x)  (x - mean(x))), ncol = 1)
-mean_y = apply(X = y_org, 2, mean)
-
-```
-
-```{r}
- coordinate_descent = function(x, y, lambda, b1 = rep(0, ncol(x))) {
-  # Initialize beta values 
-  for (j in 1:ncol(x)) {
-    if (j == 1) {
-      r = y - x[, -j, drop = FALSE] %*% b1[-j]
-    } else {
-      r = r + (x[,j, drop = FALSE] * b1[j])  - (x[,j - 1 , drop = FALSE] * b1[j - 1])
-    }
-    one_beta = (t(r) %*% x[, j]) / (t(x[, j, drop = FALSE]) %*% x[, j])
-    b1[j] = soft_th(one_beta, lambda = lambda)
-  }
-  return(b1)
-}
-
-betas_one_itr = coordinate_descent(x_normalized, y_center, 0.4)
-print(betas_one_itr[1:10])
-```
-
-### c. [15 points]
-
-```{r}
-myLasso = function(x, y, lambda, tol = 1e-5, maxitr = 100, post_beta = rep(0, ncol(x))) {
-  if (!is.matrix(x)) stop("Covariate Matrix (x) is not a matrix")
-  if (nrow(x) != length(y)) stop("Number of observations are differnt in x and y")
-  for (itr in 1:maxitr) {
-    pre_beta = post_beta
-    post_beta = coordinate_descent(x = x, y = y, lambda = lambda, b1 = pre_beta)
-    if (sum(abs(pre_beta - post_beta)) < tol)
-          break;
-  }
-  return(post_beta)
-}
-scaled_betas = myLasso(x_normalized, y_center, 0.4)
-print(scaled_betas[1:10])
-```
-
-### d. [10 points]
-Recover the parameter estimates on the original scale of the data. Report the nonzero parameter estimates. Check your results with the glmnet package on the first 11 parameters (intercept and the ten nonzero ones).
-
-```{r}
-intercept = mean_y
-rescaled_betas = (scaled_betas / sd_x) 
-rescaled_betas = c(intercept, rescaled_betas)
-print(rescaled_betas[1:11])
-```
-
-```{r}
-glmnet_lasso = glmnet(x = X_org, y = y_org, alpha = 1, lambda = 0.4)
-rescaled_betas_glmnet = coef(glmnet_lasso)
-diff_of_myLasso_glmnet = sum(abs(rescaled_betas[1:11] - rescaled_betas_glmnet[1:11]))
-print(diff_of_myLasso_glmnet)
-```
-
-The L1 norm of my solution with the glmnet solution is `r diff_of_myLasso_glmnet`
-
-The L1 norm is around 0.01, which clearly shows that the solution of the first 11 terms including the intercept is really close to the glmnet solution. This explains that the function that we wrote replicates the glmnet solution. Even the Professor mentioned it during the class that if we follow step by step, we should be able to replicated the solution from the glmnet package.
-
-### e. [15 points] Let’s modify our Lasso code to perform path-wise coordinate descent.
-
-```{r}
-lmax = 0.765074054 
-lambda_all = exp(seq(log(lmax), log(lmax*0.01), length.out = 100))
-df = data.frame(matrix(nrow = 1, ncol = 501))
-#lambda_all = 0.4
-pre_beta_lambda = rep(0, ncol(x_normalized))
-for (i in lambda_all) {
-  post_beta_lambda = myLasso(x = x_normalized, 
-                             y = y_center, 
-                             lambda = i, 
-                             post_beta = pre_beta_lambda)
-
+## a. [15 Points] Write your own code of k-means that iterates between two steps, and stop when the cluster membership does not change. Use the l2 norm as the distance metric. Write your algorithm as efficiently as possible. Avoiding extensive use of for-loop could help.
   
-  df_1 = data.frame(i, t(post_beta_lambda))
-  colnames(df_1) = colnames(df)
-  df = rbind(df, df_1)
-  pre_beta_lambda = post_beta_lambda
-  }
-
-colnames(df)[1] = "lambdas" 
-df = df[-1, ]
-
-lasso_with_all_lamdbas = data.frame("lambdas" = df[, "lambdas"], mean_y, df[, -1])
-
-temp = lasso_with_all_lamdbas # I dont need this. this is just to recheck the solution
-
-lasso_with_all_lamdbas[, 3:ncol(lasso_with_all_lamdbas)] = 
-  t(t(lasso_with_all_lamdbas[, 3:ncol(lasso_with_all_lamdbas)]) / sd_x)
-```
+  - updating the cluster means given the cluster membership
+  
+  - updating the cluster membership based on the cluster means
 
 ```{r}
-glmnet_lasso_all_lambdas = glmnet(x = X_org[, 1:10], y = y_org, alpha = 1, lambda = lambda_all)
-coef_all_lambdas = t(data.matrix(coef(glmnet_lasso_all_lambdas)))
-l1_norm_all_lambdas = apply(lasso_with_all_lamdbas[, 3:12], 
-                            1, function(x) sum(abs(x)))
-plot(glmnet_lasso_all_lambdas, main = "Beta Coefficients (glmnet) Vs L1 Norm")
-``` 
-
-```{r}
-data_for_plotting = data.frame("l1_norm" = l1_norm_all_lambdas, lasso_with_all_lamdbas[, 3:12])
-colnames(data_for_plotting) = c("l1_norm", "X1", "X2", "X3", "X4", "X5", 
-                                "X6", "X7", "X8", "X9", "X10")
-#data_for_plotting = round(data_for_plotting, 2)
-# Plot the variables with df 
-df_plot = melt(data = data_for_plotting, id.vars = "l1_norm")
-ggplot(df_plot, aes(x = l1_norm, y = value, colour = variable)) + 
-  #geom_smooth(se=FALSE) +
-  geom_line() +
-  #xlim(c(-0.001, 0.04)) +
-  ggtitle("Beta Coefficients Vs L1 Norm") +
-  labs(x = "L1 Norm", y = "Coefficients") 
-```
-
-If we look at the two plot- one by using 10 columns in `glmnet` and the other one using the `MyLasso` function that we wrote, the coefficient values looks very similar. This suggests that the function written by us is sort of replicating the `glmnet` package. And also, we get to know the way lasso is implemented in the package itself. 
-
-
-# Question 2 [30 Points] Splines
-We will fit and compare different spline models to the `Wage` dataset form the `ISLR` package.
-
-## a. [20 points]
-
-Let’s consider several different spline methods to model Wage using age. For each method (except the smoothing spline), report the degrees of freedom. To test your model, use the first 300 observations of the data as the training data and the rest as testing data. Use the mean squared error as the metric.
-
-```{r}
-data(Wage)
-plot(Wage$age, Wage$wage, pch = 19, cex = 0.5)
-```
-
-```{r}
-random_sampling = function(Wage, mybasis, shuffle=FALSE) {
-  if(shuffle == FALSE) {
-    wage_trn = head(x = Wage, 300)
-    wage_tst = tail(x = Wage, 2700)
-    mybasis_trn = head(mybasis, 300)
-    mybasis_tst = tail(mybasis, 2700)
-    return(list(wage_trn, wage_tst, mybasis_trn, mybasis_tst))
-  }
-  ids = sample(nrow(Wage), 300)
-  wage_trn = Wage[ids, ]
-  wage_tst = Wage[-ids, ]
-  mybasis_trn = mybasis[ids, ]
-  mybasis_tst = mybasis[-ids, ]
-  return(list(wage_trn, wage_tst, mybasis_trn, mybasis_tst))
+distance_calc = function(x, centroids) {
+  apply(centroids, MARGIN = 1, function(y) sqrt(sum((y - x) ^ 2)))
 }
 
-
-calc_mse = function(actual, predicted) {
-  return(mean((actual - predicted) ^ 2))
+distance_withinss = function(x, centroids) {
+  apply(centroids, MARGIN = 1, function(y) (sum((y - x) ^ 2)))
 }
+
+centroid_avg_calc = function(x, x_with_clusters) 
+  return(apply(subset(x_with_clusters, cluster == x)[, -ncol(x_with_clusters)], 2, mean))
+
+my_kmeans = function(x, k = 3, max_iter = 5000) {
+  # Initialization of the centroids
+  centroids = as.data.frame(x[sample.int(nrow(x), k), ])
+  old_cluster = rep(1, nrow(x))
+  new_cluster = rep(1, nrow(x))
+  
+  for (i in 1 : max_iter) {
+    distance_from_centroid = data.frame(t
+                                        (apply(
+                                          x,
+                                          MARGIN = 1,
+                                          FUN = distance_calc,
+                                          centroids = centroids
+                                        )))
+    # Step 1: Assign the cluster
+    # Assigning the cluster to the each data point
+    cluster = apply(distance_from_centroid, 1, FUN = function(x) which.min(x))
+    # Append the cluster into the x data frame
+    x_with_clusters = cbind.data.frame(x, cluster)
+    new_cluster = x_with_clusters$cluster
+    # Step 2: Update the Centroids
+    # Updating the centroids 
+    centroids = data.frame(t
+                           (sapply(
+                             seq(1, k, 1), 
+                             FUN = centroid_avg_calc, 
+                             x_with_clusters = x_with_clusters
+                             )
+                             )
+                           )
+    
+    if(identical(old_cluster, new_cluster) == TRUE){
+      break;
+    } else { old_cluster = new_cluster }
+  }
+  # To calculate the within sum of squares
+  distance_from_centroid_withinss = data.frame(t
+                                        (apply(
+                                          x,
+                                          MARGIN = 1,
+                                          FUN = distance_withinss,
+                                          centroids = centroids
+                                        )))
+  all_withinss = data.frame(t(apply(distance_from_centroid_withinss,1, 
+                   FUN = function(x) c(x[which.min(x)], which.min(x)
+                                       ))))
+  colnames(all_withinss) = c("withinss", "cluster")
+  withinss = data.frame(t(sapply(seq(1, k, 1),  
+                    FUN = function(x, all_withinss) {
+                      temp = subset(all_withinss, cluster == x) 
+                      return(c(x, sum(temp$withinss))) 
+                      }, 
+                    all_withinss = all_withinss
+                    )))
+  colnames(withinss) = c("cluster", "withinss")
+  return(list("data_with_clusters" = x_with_clusters, 
+              "centroids" = centroids, 
+              "withinss" = withinss,
+              "tot_withinss" = sum(withinss$withinss)
+              )
+         )}
 ```
 
-### a1. Write your own code (you cannot use bs() or similar functions) to implement a continuous piecewise linear spline fitting. Pick 4 knots using your own judgment.
+## b. [5 points] Test your code with this small-sized example by performing the following. Make sure that you save the random seed.
+
+  - Run your algorithm on the data using ONE random initialization, output the within-cluster distance, and compare the resulting clusters with the underlying truth.
+  
+  - Run your algorithm on the data using 20 random initialization, output the within-cluster distance, and compare the resulting clusters with the underlying truth.
+  
+  - Do you observe any difference? Note that the result may vary depending on the random seed.
 
 ```{r}
-# We have to use 4 knots 
-my_knots = c(30, 40, 50, 60)
-# Function to calculate the basis for continuous splines
-pos = function(x) { x * (x > 0) }
-# Creating basis for the continuos linear 
-mybasis = cbind("x_0" = 1, 
-                "x_1" = Wage$age, 
-                "x_2" = pos(Wage$age - my_knots[1]), 
-                "x_3" = pos(Wage$age - my_knots[2]),
-                "x_4" = pos(Wage$age - my_knots[3]), 
-                "x_5" = pos(Wage$age - my_knots[4])
-                )
-# Sampling for the calculation of the mse
-wage = random_sampling(Wage, mybasis = mybasis)
-
-# Linear fit using our basis function
-lmfit <- lm(wage[[1]]$wage ~ . -1, data = data.frame(wage[[3]]))
-
-# Plot the graph
-par(mar = c(2,3,2,0))  
-plot(wage[[1]]$age, wage[[1]]$wage, pch = 19, cex = 0.5, 
-     col = "darkorange", xlab = "Age", ylab = "Wage")
-lines(wage[[1]]$age, lmfit$fitted.values, lty = 1, col = "deepskyblue", lwd = 4)
-abline(v = my_knots, lty = 2)
-title("Continuous Linear Spline")
-mse_cls = calc_mse(wage[[2]]$wage, predict(object = lmfit, newdata = data.frame(wage[[4]])))
-df_cls = ncol(mybasis)
-```
-
-### a2. Write your own code to implement a quadratic spline fitting. Your spline should have a continuous first derivative. Pick 4 knots using your own judgment.
-
-```{r}
-# We have to use 4 knots 
-my_knots = c(30, 40, 50, 60)
-# Creating basis for the Quadratic Spline
-mybasis = cbind("x_0" = 1, 
-                "x_1" = Wage$age, 
-                "x_11" = Wage$age ^ 2, 
-                "x_22" = pos(Wage$age - my_knots[1]) ^ 2,
-                "x_33" = pos(Wage$age - my_knots[2]) ^ 2,
-                "x_44" = pos(Wage$age - my_knots[3]) ^ 2,
-                "x_55" = pos(Wage$age - my_knots[4]) ^ 2
-                )
-
-# Sample the data into train and tst data for calculating mse
-wage = random_sampling(Wage, mybasis = mybasis)
-
-# Fit the data into new basis functions
-lmfit <- lm(wage[[1]]$wage ~ . -1, data = data.frame(wage[[3]]))
-
-# Plot the training data 
-par(mar = c(2,3,2,0))  
-plot(wage[[1]]$age, wage[[1]]$wage, pch = 19, cex = 0.5, 
-     col = "darkorange", xlab = "Age", ylab = "Wage")
-lines(wage[[1]]$age, lmfit$fitted.values, lty = 1, col = "deepskyblue", lwd = 4)
-abline(v = my_knots, lty = 2)
-title("Continuous Quadratic Spline")
-mse_cqs = calc_mse(wage[[2]]$wage, predict(object = lmfit, newdata = data.frame(wage[[4]])))
-df_cqs = ncol(mybasis)
-```
-
-### 2c. Use existing functions (bs() or similar) to implement a cubic spline with 4 knots. Use their default knots.
-
-```{r, warning = FALSE}
-# Fit a cubic spline with 4 knots (knots = df - degree -1, if there is intercept) 
-lmfit <- lm(wage ~ splines::bs(age, degree = 3, df = 8, intercept = TRUE), data = wage[[1]])
-
-# Plot the cubic splice with 4 knots - selected automatically by bs()
-par(mar = c(2,2,2,0))
-plot(wage[[1]]$age, wage[[1]]$wage, pch = 19, cex = 0.5, 
-     col = "darkorange", xlab = "Age", ylab = "Wage")
-lines(wage[[1]]$age, lmfit$fitted.values, lty = 1, col = "deepskyblue", lwd = 4)
-title("Cubic spline with 4 knots using bs() function")
-mse_ccs = calc_mse(wage[[2]]$wage, predict(object = lmfit, newdata = wage[[2]]))
-df_ccs = 4 + length(my_knots)
-```
-
-### 2d. Use existing functions to implement a natural cubic spline with 6 knots. Choose your own knots.
-
-```{r}
-# Fit a natural cubic splines with 6 own knots
-fit_ns = lm(wage ~ splines::ns(age, knots = c(20, 30, 40, 50, 60, 70)), data = wage[[1]])    
-# Plot the data for the NCS with 6 knots
-plot(wage[[1]]$age, wage[[1]]$wage, pch = 19, cex = 0.5, 
-     col = "darkorange", xlab = "Age", ylab = "Wage")
-lines(seq(0, 100), predict(fit_ns, data.frame("age"= seq(0, 100))), 
-      col="darkgreen", lty=1, lwd = 3)
-legend("topright", c("Natural Cubic Spline"), 
-       col = c("darkgreen"), 
-       lty = 1, 
-       lwd = 3, 
-       cex = 1.2)
-title("Natural Cubic Spline")
-# Calculating the mse for NCS
-mse_ncs = calc_mse(wage[[2]]$wage, predict(object = fit_ns, newdata = wage[[2]]))
-df_ncs = 6
-```
-
-### 2e. Use existing functions to implement a smoothing spline. Use the built-in generalized cross-validation method to select the best tuning parameter.
-
-```{r}
-# Fit a smoothing spline using smooth.spline function in stats package
-fit_smooth = smooth.spline(Wage$age, Wage$wage)
-# Plot the smoothing spline
-plot(Wage$age, Wage$wage, pch = 19, cex = 0.5, col = "darkorange", 
-      xlab = "Age", ylab = "Wage")
-lines(seq(0, 100), predict(fit_smooth, seq(0, 100))$y, col="darkgreen", lty=1, lwd = 3)
-df_ss = fit_smooth$df
+set.seed(4)
+x = rbind(matrix(rnorm(100), 50, 2), matrix(rnorm(100, mean = 0.5), 50, 2))
+y = c(rep(0, 50), rep(1, 50))
+x_y = cbind.data.frame(x, y)
+colnames(x_y) = c("x1", "x2", "cluster")
 ```
 
 ```{r}
-# combining all the data to make an html table 
-dof_mse_df = tibble("Model" = c("Linear Spline", "Quadratic Spline", "Cubic Spline", 
-                                "Natural Cubic Spline", "Smooth Spline"),
-                    "Degrees of Freedom" = c(df_cls, df_cqs, df_ccs, df_ncs, df_ss), 
-                    "Mean Squared Error" = c(mse_cls, mse_cqs, mse_ccs, mse_ncs, NA))
-kable(dof_mse_df, digits = 2, row.names = FALSE, align = "c") %>%
+random_init_1 = my_kmeans(x = x, k = 2, max_iter = 5000)
+tot_withinss_01 = random_init_1$tot_withinss
+p1 = ggplot(x_y, aes(x = x1, y = x2, color = as.factor(cluster))) + 
+  geom_point() +
+  labs(x = "X1", y = "X2") +
+  ggtitle("Original Data")
+colnames(random_init_1$data_with_clusters) = c("x1", "x2", "cluster")
+colnames(x_y) = c("x1", "x2", "cluster")
+p2 = ggplot(random_init_1$data_with_clusters, 
+            aes(x = x1, y = x2, color = as.factor(cluster))) +
+  geom_point() +
+  labs(x = "X1", y = "X2") +
+  ggtitle("Clustered Data Using 1 Initialization")
+grid.arrange(p1, p2)
+```
+
+```{r}
+initialization = 1:20
+random_init_20 = lapply(initialization, my_kmeans, x = x, k = 2)
+least_withinss = sapply(initialization, 
+                     function(x, 
+                              random_init_20) random_init_20[[x]]$tot_withinss,
+                     random_init_20 = random_init_20)
+tot_withinss_20 = least_withinss[which.min(least_withinss)]
+best_random_k = random_init_20[[which.min(least_withinss)]]
+colnames(best_random_k$data_with_clusters) = c("x1", "x2", "cluster")
+p3 = ggplot(best_random_k$data_with_clusters, 
+            aes(x = x1, y = x2, color = as.factor(cluster))) +
+  geom_point() +
+  labs(x = "X1", y = "X2") +
+  ggtitle("Clustered Data Using 20 Initialization")
+grid.arrange(p1, p3)
+```
+
+```{r}
+# Using the already existing kmeans algorithm to verify
+clusters_using_kmeans = kmeans(x, 2)
+```
+
+```{r}
+df = tibble("Within-SS (1)" = tot_withinss_01, 
+            "Within-SS (20)" = tot_withinss_20, 
+            "Within-SS (Kmeans)" = clusters_using_kmeans$tot.withinss)
+kable(df, digits = 4, row.names = FALSE, align = "c") %>%
   kable_styling("striped", full_width = FALSE) %>%
-  add_header_above(c("Degrees of Freedom and MSE" = 3)) %>% 
+  add_header_above(c("Total Within-SS for Different Initialization" = 3))
+```
+
+We see there is a difference in the Total Within-Sum of Squares with **1** initialization and **20** initalizations. The Total-Within SS are `r random_init_1$tot_withinss` and `r least_withinss[which.min(least_withinss)]`. 
+
+We clearly see that the **20** initilizations gives a better Within-SS compared to the **1** initilization. I also checked this using the **K-Means** algorithm already implemented in R which gives us the same result as **20** initilizations. 
+
+This is one of the problems in K-Means, where if the initiliazation is not done correctly, the  cluster generation might not be optimal. Hence, it is important for us to do multiple random initilizations to make sure that we get the best clusters for the data. 
+
+## c. [10 Points] Load the zip.train (handwritten digit recognition) data from the ElemStatLearn package and the goal is to identify clusters of digits based on only the pixels. Apply your algorithm on the handwritten digit data with k=15, with ten random initialization. Then, compare your cluster membership to the true digits.
+
+  - For each of your identified clusters, which is the representative (most dominating) digit?
+  
+  - How well does your clustering result recover the truth? Which digits seem to get mixed up (if any) the most? Again, this may vary depending on the random seed. Hence, make sure that you save the random seed.
+
+```{r}
+set.seed(1234)
+trn = as.data.frame(zip.train)
+initialization = 1:10
+image_k_means = lapply(initialization, my_kmeans, x = trn[, c(-1)], k = 15)
+least_withinss = sapply(initialization, 
+                     function(x, 
+                              image_k_means) image_k_means[[x]]$tot_withinss,
+                     image_k_means = image_k_means)
+best_init = which.min(least_withinss)
+final_cluster = image_k_means[[best_init]]
+```
+
+```{r}
+y = trn[, 1]
+df = cbind.data.frame(y, 
+                      "cluster"= final_cluster$data_with_clusters[,ncol(final_cluster$data_with_clusters)])
+frequent_number = function(x, df){
+  temp = subset(df, cluster == x)
+  all_nos = table(temp$y)
+  most_freq = as.integer(names(all_nos[which.max(all_nos)]))
+  return(c(x, most_freq))
+}
+dominating_digit = data.frame(t(
+  sapply(1:15, frequent_number, df = df)
+))
+colnames(dominating_digit) = c("Cluster Number", "Dominating Digit")
+kable(dominating_digit, digits = 2, row.names = FALSE) %>%
+  kable_styling("striped", full_width = FALSE) %>%
+  add_header_above(c("Dominating Digit in Each Cluster" = 2)) %>% 
   column_spec(column = 1, bold = TRUE)
 ```
 
-## b. [10 points]
-
-After writing these models, evaluate their performances by repeatedly doing a train-test split of the data. Randomly sample 300 observations as the training data and the rest as testing data. Repeat this process 200 times. Use the mean squared error as the metric.
-
-### b1. Record and report the mean, median, and standard deviation of the errors for each method. Also, provide an informative boxplot that displays the error distribution for all models side-by-side.
-
 ```{r}
-rownames(Wage) = 1:nrow(Wage)
-linear_spline = function() {
-  # We have to use 4 knots 
-  my_knots = c(30, 40, 50, 60)
-  # Function to calculate the basis for continuous splines
-  pos = function(x) { x * (x > 0) }
-  # Creating basis for the continuos linear 
-  mybasis = cbind("x_0" = 1, 
-                  "x_1" = Wage$age, 
-                  "x_2" = pos(Wage$age - my_knots[1]), 
-                  "x_3" = pos(Wage$age - my_knots[2]),
-                  "x_4" = pos(Wage$age - my_knots[3]), 
-                  "x_5" = pos(Wage$age - my_knots[4])
-                  )
-  # Sampling for the calculation of the mse
-  wage = random_sampling(Wage, mybasis = mybasis, shuffle = TRUE)
-  
-  # Linear fit using our basis function
-  lmfit <- lm(wage[[1]]$wage ~ . -1, data = data.frame(wage[[3]]))
-  mse_cls = calc_mse(wage[[2]]$wage, predict(object = lmfit, newdata = data.frame(wage[[4]])))
-  return(mse_cls)
-  }
-
-mse_cls_200 = replicate(n = 200, expr = linear_spline(), simplify = "vector")
-```
-
-```{r}
-quadratic_spline = function() {
-  # We have to use 4 knots 
-  my_knots = c(30, 40, 50, 60)
-  # Creating basis for the Quadratic Spline
-  mybasis = cbind("x_0" = 1, 
-                  "x_1" = Wage$age, 
-                  "x_11" = Wage$age ^ 2, 
-                  "x_22" = pos(Wage$age - my_knots[1]) ^ 2,
-                  "x_33" = pos(Wage$age - my_knots[2]) ^ 2,
-                  "x_44" = pos(Wage$age - my_knots[3]) ^ 2,
-                  "x_55" = pos(Wage$age - my_knots[4]) ^ 2
-                  )
-  
-  # Sample the data into train and tst data for calculating mse
-  wage = random_sampling(Wage, mybasis = mybasis, shuffle = TRUE)
-  
-  # Fit the data into new basis functions
-  lmfit <- lm(wage[[1]]$wage ~ . -1, data = data.frame(wage[[3]]))
-  mse_cqs = calc_mse(wage[[2]]$wage, predict(object = lmfit, newdata = data.frame(wage[[4]])))
-  return(mse_cqs)
-
-  }
-
-mse_cqs_200 = replicate(n = 200, expr = quadratic_spline(), simplify = "vector")
-```
-
-```{r, warning = FALSE}
-cubic_spline = function() {
-  wage = random_sampling(Wage, mybasis = mybasis, shuffle = TRUE)
-  # Fit a cubic spline with 4 knots (knots = df - degree -1, if there is intercept) 
-  lmfit <- lm(wage ~ splines::bs(age, degree = 3, df = 8, intercept = TRUE), data = wage[[1]])
-  mse_ccs = calc_mse(wage[[2]]$wage, predict(object = lmfit, newdata = wage[[2]]))
-  return(mse_ccs)
-}
-mse_ccs_200 = replicate(n = 200, expr = cubic_spline(), simplify = "vector")
-```
-
-```{r, warning=FALSE}
-nature_cubic_spline = function() {
-  #set.seed(12345)
-  wage = random_sampling(Wage, mybasis = mybasis, shuffle = TRUE)
-  my_knots = runif(6, min(wage[[1]]$age), max(wage[[1]]$age))
-  fit_ns = lm(wage ~ splines::ns(age, knots = my_knots), 
-                       data = wage[[1]])
-  mse_ncs = calc_mse(wage[[2]]$wage, predict(object = fit_ns, newdata = wage[[2]])) 
-  return(mse_ncs)
-}
-mse_ncs_200 = replicate(n = 200, expr = nature_cubic_spline(), simplify = "vector")
-```
-
-```{r}
-smooth_spline = function() {
-  wage = random_sampling(Wage, mybasis = mybasis, shuffle = TRUE)
-  # Fit a smoothing spline using smooth.spline function in stats package
-  fit_smooth = smooth.spline(wage[[1]]$age, wage[[1]]$wage)
-  mse_ss = calc_mse(wage[[2]]$wage, 
-                    predict(object = fit_smooth, wage[[2]]$age)$y)
-  
-  }
-mse_ss_200 = replicate(n = 200, expr = smooth_spline(), simplify = "vector")
-```
-
-```{r}
-mean_cls = mean(mse_cls_200)
-mean_cqs = mean(mse_cqs_200)
-mean_ccs = mean(mse_ccs_200)
-mean_ncs = mean(mse_ncs_200)
-mean_ss = mean(mse_ss_200)
-
-med_cls = median(mse_cls_200)
-med_cqs = median(mse_cqs_200)
-med_ccs = median(mse_ccs_200)
-med_ncs = median(mse_ncs_200)
-med_ss = median(mse_ss_200)
-
-sd_cls = sd(mse_cls_200)
-sd_cqs = sd(mse_cqs_200)
-sd_ccs = sd(mse_ccs_200)
-sd_ncs = sd(mse_ncs_200)
-sd_ss = sd(mse_ss_200)
-
-dof_mse_df = tibble("Model" = c("Linear Spline", "Quadratic Spline", "Cubic Spline", 
-                                "Natural Cubic Spline", "Smooth Spline"),
-                    "Mean" = c(mean_cls, mean_cqs, mean_ccs, mean_ncs, mean_ss), 
-                    "Median" = c(med_cls, med_cqs, med_ccs, med_ncs, med_ss), 
-                    "Standard Deviation" = c(sd_cls, sd_cqs, sd_ccs, sd_ncs, sd_ss))
-kable(dof_mse_df, digits = 2, row.names = FALSE, align = "c") %>%
-  kable_styling("striped", full_width = FALSE) %>%
-  add_header_above(c("Mean Median and Standard Deviation" = 4)) %>% 
+mixed_up_numbers = as.data.frame.matrix(table(df))
+mixed_up_numbers = cbind("Numbers" = row.names(mixed_up_numbers), mixed_up_numbers)
+kable(mixed_up_numbers, digits = 2, row.names = FALSE) %>%
+  kable_styling("striped", full_width = FALSE, latex_options = "scale_down") %>%
+  add_header_above(c("Number and Cluster Frequency" = 16)) %>% 
   column_spec(column = 1, bold = TRUE)
 ```
 
-Base on the mean + 1 SE rule, I will choose the Linear Spline as the (mean + sd) is less than the (mean + sd) of smoothing spline.
+From the table above, the digits that seem to get mixed up the most are (4, 7 and 9) and (4, 9)
 
-```{r, warning=FALSE}
-df = data.frame("Linear Spline" = mse_cls_200,
-                "Quadratic Spline" = mse_cqs_200,
-                "Cubic Spline" = mse_ccs_200,
-                "Natural Cubic Spline" = mse_ncs_200, 
-                "Smooth Spline" = mse_ss_200
-                )
-p1 = ggplot(data = df, aes(x = "", y = df$Linear.Spline)) + geom_boxplot() + labs(x = "Linear", y = "MSE")
-p2 = ggplot(data = df, aes(x = "", y = df$Quadratic.Spline)) + geom_boxplot() + labs(x = "Quadratic", y = "MSE") 
-p3 = ggplot(data = df, aes(x = "", y = df$Cubic.Spline)) + geom_boxplot()+ labs(x = "Cubic", y = "MSE")
-p4 = ggplot(data = df, aes(x = "", y = df$Natural.Cubic.Spline)) + geom_boxplot() + labs(x = "Natural Cubic", y = "MSE") + ylim(1500, 3500)
-p5 = ggplot(data = df, aes(x = "", y = df$Smooth.Spline)) + geom_boxplot() + labs(x = "Smmothing Spline", y = "MSE")
-gridExtra::grid.arrange(p1, p2, p3, p4, p5, ncol = 3) 
+## d. [10 Points] If you are asked to use this clustering result as a predictive model and suggest (predict) a label for each of the testing data zip.test, what would you do? Properly describe your prediction procedure and carry out the analysis. What is the prediction accuracy of your model? Note that you can use the training data labels for prediction.
 
+The procedure to use the clustering technique for prediction is the following:
+  
+  1. Pick the values of the independent columns for each testing data point.
+  2. Calculate the distance of the above testing data point to all the cluster centroids.
+  3. Save the distances into a data frame.
+  4. Pick the cluster centroid that has the minimum distance from the testing point.
+  5. Using the cluster point, predict the most frequent value of the digit for the testing point. 
+  6. Repeat Steps 1 through 5 for all the data points in the testing data set. 
+  
+```{r}
+tst = as.data.frame(zip.test)
+y_tst = tst[, 1]
+x_tst = tst[, c(-1)]
+prediction_using_kmeans = function(x, centroids, lookup_table) {
+  temp = apply(centroids, 1, function(y, x) sqrt(sum((y - x) ^ 2)), x = x)
+  prediction = lookup_table[which.min(temp),"Dominating Digit"]
+}
+predicted_value = apply(X = x_tst, MARGIN = 1, 
+                        prediction_using_kmeans, 
+                        centroids = final_cluster$centroids, 
+                        lookup_table = dominating_digit)
+accuracy = mean(predicted_value == y_tst)
 ```
 
-### b2. For each method, provide a discussion of their (theoretical) advantages and disadvantages. Based on the empirical results, what method would you prefer?
+The prediction accuracy for the the `zip.tst` is `r accuracy`
 
-#### Adavantages and Disadvantages of different spline methods
+# Question 3 [40 Points] Two-dimensional Kernel Regression
 
-1. Linear Spline
+For this question, you need to write your own functions. The goal is to model and predict the eruption duration using the waiting time in between eruptions of the Old Faithful Geyser. You can download the data from [kaggle: Old Faithful] or our course website.
 
-Advantages
-- It is linear at the boundaries as their is no other terms  
+```{r}
+faithful = read.csv("data/faithful.csv", stringsAsFactors = FALSE)
+plot(faithful$waiting, faithful$eruptions)
+```
 
-Disadvantages
+## a) Use a kernel density estimator to estimate the density of the eruption waiting time. Use a bandwidth with the theoretical optimal rate (the Silverman rule-of-thumb formula). Plot the estimated density function. You should consider two kernel functions:
+  - Gaussian Kernel
+  
+  - Uniform kernel
 
-- It does not capture the variation in the data as it is linear
-- If the knots are not chosen correctly, then the accuracy comes down
+```{r}
+# Silverman Rule-of-Thumb
+lambda_hat = sd(faithful$waiting) * (4 / 3 / length(faithful$waiting)) ^ (1 / 5)
+# Creating a grid to plot the density
+x_grid = seq(min(faithful$waiting), max(faithful$waiting), 1)   
+# Gaussian kernel for density estimation
+gaussian_kernel = function(x, obs, h) sum(exp(-0.5 * ((x - obs) / h) ^ 2) / sqrt(2 * pi))
+# Plotting the density estimation for the Waiting time
+par(mfrow = c(1, 2), mar=rep(2, 4))
+hist(faithful$waiting, main = "Histogram of Waiting Time")
+plot(x_grid, sapply(x_grid, 
+                   FUN = gaussian_kernel, obs = faithful$waiting, 
+                   h = lambda_hat) / length(faithful$waiting), 
+     type = "l",
+     xlab = "Waiting Time", 
+     ylab = "Estimated Density", 
+     col = "firebrick", 
+     lwd = 3)
+```
 
-2. Cubic and Quadratic Splines
+```{r}
+# Uniform Kernel Estimation
+uniform_kernel = FUN = function(x, obs, h) 
+  sum( ((x-h/2) <= obs) * ((x+h/2) > obs))/h/length(obs)
+par(mfrow = c(1, 2), mar=rep(2, 4))
+hist(faithful$waiting, main = "Histogram of Waiting Time")
+plot(x_grid, sapply(x_grid, FUN = uniform_kernel , 
+                   obs = faithful$waiting, h = lambda_hat), 
+     type = "s", 
+     col = "firebrick", 
+     lwd = 3)  
+```
 
-Advantages
+## b. [15 points] Use a Nadaraya-Watson kernel regression estimator to model the conditional mean eruption duration using the waiting time. Use a 10-fold cross-validation to select the optimal bandwidth. You should use the Epanechnikov kernel for this task. Report the optimal bandwidth and plot the fitted regression line using the optimal bandwidth.
 
-- Because of the more flexibility of the model (by including higher terms) it captures the data much better than the linear spline.
+```{r}
+rmse_calc = function(actual, predicted) {
+  sqrt(mean((actual - predicted) ^ 2))
+}
+kernel_regression = function(x, obs, h, y) {
+  k = ifelse(abs((x - obs) / h) <= 1, (3/4) * (1 - (((x - obs) / h) ^ 2)), 0)
+  k_sum = sum(k)
+  weight = k / k_sum
+  y_k = sum(weight * y)
+  y_k
+}
+nfold = 10
+index_fold = sample(rep(1:nfold, length.out = nrow(faithful))) 
+all_k = c(seq(from = 0, to = 15, by = 0.5))
+accu_matrix = rep(0, length(all_k))
+for (k in 1:length(all_k)) {
+  temp_rmse = rep(0, nfold)
+  for (l in 1:nfold) {
+    train = faithful[index_fold != l, ] 
+    test = faithful[index_fold == l, ]
+    estimate_x = test$waiting
+    estimated_df = (sapply(X = test$waiting, 
+                                 FUN = kernel_regression, 
+                                 obs = train$waiting, 
+                                 h = all_k[k], 
+                                 y = train$eruptions)
+                          )
+    temp_rmse[l] = rmse_calc(actual = test$eruptions, predicted = estimated_df)
+  }
+  accu_matrix[k] = mean(temp_rmse)
+}
+# Optimal bandwidth for the kernal regression
+optimal_bandwidth = all_k[which.min(accu_matrix)]
+# Plotting the fir for all the possible bandwidth 
+plot(all_k, accu_matrix, type = "l", 
+     xlab = "Different Bandwidth values", 
+     ylab = "RMSE", 
+     col = "darkblue", 
+     lwd = 3)
+abline(v = optimal_bandwidth, col = "firebrick", lwd = 3)
+```
 
-Disadvantages
+The optimal value of the Bandwidth is `r round(optimal_bandwidth, 3)`
 
-- Because of the higher terms, the value at the boundary can be highly variable and can be out of the ranges
-- Similar to the linear spline, the knot selection can have huge impact on the fit
+```{r}
+# For plotting the data for the optimal bandwidth
+estimated_df = sapply(X = seq(min(faithful$waiting), max(faithful$waiting), 1), 
+                                 FUN = kernel_regression, 
+                                 obs = faithful$waiting, 
+                                 h = optimal_bandwidth, 
+                                 y = faithful$eruptions
+                      )
+plot(faithful$waiting,faithful$eruptions,
+     xlab = "Waiting Time", ylab = "Eruption Duration", 
+     col = 'darkblue')
+lines(seq(min(faithful$waiting), max(faithful$waiting), 1),
+      estimated_df, col = 'firebrick', lwd = 3)
+```
 
-3. Natural Cubic Spline
+## c. [15 points] Fit a local linear regression to model the conditional mean eruption duration using the waiting time. Use a 10-fold cross-validation to select the optimal bandwidth. You should use the Gaussian kernel for this task. Report the optimal bandwidth and plot the fitted regression line using the optimal bandwidth.
 
-Advantages
+```{r}
+kernel_linear_regression = function(x, obs, h, y) {
+  k = exp(-0.5 * ((x - obs) / h) ^ 2) / sqrt(2 * pi)
+  w = diag(k)
+  X = cbind(rep(1, length(obs)), obs)
+  beta = solve(t(X) %*% w %*% X) %*% t(X) %*% w %*% y
+  beta_0 = beta[1, 1]
+  beta_1 = beta[2, 1]
+  y_k = beta_0 + (beta_1 * x)
+}
+nfold = 10
+index_fold = sample(rep(1:nfold, length.out = nrow(faithful))) 
+all_k = c(seq(from = 0.5, to = 10, by = 0.5))
+accu_matrix = rep(0, length(all_k))
+for (k in 1:length(all_k)) {
+  temp_rmse = rep(0, nfold)
+  for (l in 1:nfold) {
+    train = faithful[index_fold != l, ] 
+    test = faithful[index_fold == l, ]
+    estimate_x = test$waiting
+    estimated_df = sapply(X = test$waiting, 
+                                 FUN = kernel_linear_regression, 
+                                 obs = train$waiting, 
+                                 h = all_k[k], 
+                                 y = train$eruptions)
+    temp_rmse[l] = rmse_calc(actual = test$eruptions, predicted = estimated_df)
+  }
+  accu_matrix[k] = mean(temp_rmse)
+}
+# Optimal bandwidth for the kernal regression
+optimal_bandwidth = all_k[which.min(accu_matrix)]
+# Plotting the fir for all the possible bandwidth 
+plot(all_k, accu_matrix, type = "l", 
+     xlab = "Different Bandwidth values", 
+     ylab = "RMSE", 
+     col = "darkblue", 
+     lwd = 3)
+abline(v = optimal_bandwidth, col = "firebrick", lwd = 3)
+```
 
-- One of the biggest advantages is that because of the additonla conditions on cubic splines, the value does not overshoot at the boundaries
+The optimal value of the Bandwidth is `r round(optimal_bandwidth, 3)`
 
-Disadvantages
+```{r}
+# For plotting the data for the optimal bandwidth
+estimated_df = sapply(X = seq(min(faithful$waiting), max(faithful$waiting), 1), 
+                                 FUN = kernel_linear_regression, 
+                                 obs = faithful$waiting, 
+                                 h = optimal_bandwidth, 
+                                 y = faithful$eruptions
+                      )
+plot(faithful$waiting,faithful$eruptions,
+     xlab = "Watiting Time", 
+     ylab = "Eruption Duration", 
+     col = 'darkblue')
+lines(seq(min(faithful$waiting), max(faithful$waiting), 1),
+      estimated_df, col = 'firebrick', lwd = 3)
+```
 
-- Similar to the linear spline, the knot selection can have huge impact on the fit
-
-4. Smooth Spline
-
-Advantages
-
-- The biggest advantage is that, we do not have to select the knots manually. It considers all the data points as a knot
-
-Disadvantages
-
-- The disadvantage is that it has to fit and complex model and has to estimate all the parameters(n) which makes it a complex model
-
+*** 
